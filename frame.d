@@ -104,7 +104,7 @@ Frame parse(string source, ubyte[] data) {
         }),
         // we don't want to wait for all the data to arrive at once (if we wanted then the condition
         // should be `data.length >= frame.length`), we prefer processing as it comes
-        "message_extraction".Checkpoint(q{ data.length >= 1 }, q{
+        "message_extraction".Checkpoint(q{ (frame.length > 0 && data.length >= 1) || (frame.length == 0) }, q{
             if (frame.masked) {
                 size_t i = frame.data.length;
                 while (frame.remaining > 0 && data.length > 0) {
@@ -178,5 +178,13 @@ unittest { // test edge-case length=127
     for (size_t i=0; i<127; i++) data ~= cast(ubyte) i;
     auto f = Frame(true, Op.BINARY, false, data.length, [0,0,0,0], true, data);
     auto _f = "u3".parse(f.serialize);
+    assert(f == _f);
+}
+
+
+unittest { // test edge-case length=0
+    import std.stdio;
+    auto f = Frame(true, Op.CLOSE, false, 0, [0,0,0,0], true, []);
+    auto _f = "u4".parse(f.serialize);
     assert(f == _f);
 }

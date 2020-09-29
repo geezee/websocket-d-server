@@ -1,21 +1,22 @@
 import std.stdio;
 import std.socket;
-import std.uuid;
 
 import config;
 import request;
 import frame;
 
+alias PeerID = size_t;
+
 class WebSocketState {
     Socket socket;
     bool handshaken;
     Frame[] frames = [];
-    public immutable UUID id;
+    public immutable PeerID id;
     public immutable Address address;
 
     @disable this();
 
-    this(UUID id, Socket socket) {
+    this(PeerID id, Socket socket) {
         this.socket = socket;
         this.handshaken = false;
         this.id = id;
@@ -45,13 +46,15 @@ class WebSocketState {
 
 abstract class WebSocketServer {
 
-    private WebSocketState[UUID] sockets;
+    private WebSocketState[PeerID] sockets;
     private Socket listener;
 
-    abstract void onOpen(UUID s);
-    abstract void onTextMessage(UUID s, string s);
-    abstract void onBinaryMessage(UUID s, ubyte[] o);
-    abstract void onClose(UUID s);
+    abstract void onOpen(PeerID s);
+    abstract void onTextMessage(PeerID s, string s);
+    abstract void onBinaryMessage(PeerID s, ubyte[] o);
+    abstract void onClose(PeerID s);
+
+    private static PeerID counter = 0;
 
     this() {
         listener = new TcpSocket();
@@ -66,12 +69,10 @@ abstract class WebSocketServer {
             socket.close();
             return;
         }
-        UUID id;
-        do { id = randomUUID(); } while (id in sockets);
-        auto s = new WebSocketState(id, socket);
-        sockets[id] = s;
-        onOpen(id);
-        writefln("[DEBUG] Accepting from %s (id=%s)", socket.remoteAddress, id);
+        auto s = new WebSocketState(counter++, socket);
+        writefln("[DEBUG] Accepting from %s (id=%s)", socket.remoteAddress, s.id);
+        sockets[s.id] = s;
+        onOpen(s.id);
     }
 
     private void remove(WebSocketState socket) {
@@ -82,7 +83,9 @@ abstract class WebSocketServer {
     }
 
     private void handle(WebSocketState socket, ubyte[] message) {
-        if (socket.handshaken) handleFrame(socket, parse(socket.id.toString, message));
+        import std.conv : to;
+        string processId = typeof(this).stringof ~ socket.id.to!string;
+        if (socket.handshaken) handleFrame(socket, processId.parse(message));
         else socket.performHandshake(message);
     }
 
@@ -138,7 +141,7 @@ abstract class WebSocketServer {
         writefln("[DEBUG] Received pong from %s", socket.id);
     }
 
-    public void sendText(UUID dest, string message) {
+    public void sendText(PeerID dest, string message) {
         if (dest !in sockets) {
             writefln("[WARN] Trying to send a message to %s which is not connected");
             return;
@@ -151,7 +154,7 @@ abstract class WebSocketServer {
         sockets[dest].socket.send(serial);
     }
 
-    public void sendBinary(UUID dest, ubyte[] message) {
+    public void sendBinary(PeerID dest, ubyte[] message) {
         if (dest !in sockets) {
             writefln("[WARN] Trying to send a message to %s which is not connected");
             return;

@@ -1,15 +1,14 @@
 import std.stdio;
-import std.uuid;
 
 import server;
 
 class EchoSocketServer : WebSocketServer {
 
-    override void onOpen(UUID s) {}
-    override void onClose(UUID s) {}
-    override void onBinaryMessage(UUID s, ubyte[] msg) {}
+    override void onOpen(PeerID s) {}
+    override void onClose(PeerID s) {}
+    override void onBinaryMessage(PeerID s, ubyte[] msg) {}
 
-    override void onTextMessage(UUID s, string msg) {
+    override void onTextMessage(PeerID s, string msg) {
         writefln("[DEBUG] received message from %s", s);
         writefln("[DEBUG]         message: %s", msg);
         writefln("[DEBUG]         message length: %d", msg.length);
@@ -20,19 +19,19 @@ class EchoSocketServer : WebSocketServer {
 
 class BroadcastServer : WebSocketServer {
 
-    byte[UUID] peers;
+    byte[PeerID] peers;
 
-    override void onBinaryMessage(UUID s, ubyte[] msg) {}
+    override void onBinaryMessage(PeerID s, ubyte[] msg) {}
 
-    override void onOpen(UUID s) {
+    override void onOpen(PeerID s) {
         peers[s] = 0;
     }
 
-    override void onClose(UUID s) {
+    override void onClose(PeerID s) {
         peers.remove(s);
     }
 
-    override void onTextMessage(UUID src, string msg) {
+    override void onTextMessage(PeerID src, string msg) {
         foreach (uuid,_; peers) if (uuid != src) sendText(uuid, msg);
     }
 }

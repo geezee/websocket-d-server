@@ -13,6 +13,7 @@ class WebSocketState {
     Frame[] frames = [];
     public immutable PeerID id;
     public immutable Address address;
+    public string path;
 
     @disable this();
 
@@ -23,7 +24,7 @@ class WebSocketState {
         this.address = cast(immutable Address) (socket.remoteAddress);
     }
 
-    public void performHandshake(ubyte[] message) {
+    public bool performHandshake(ubyte[] message) {
         import std.base64 : Base64;
         import std.digest.sha : sha1Of;
         import std.conv : to;
@@ -31,7 +32,8 @@ class WebSocketState {
         enum MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
         enum KEY = "Sec-WebSocket-Key";
         Request request = Request.parse(message);
-        if (!request.done) return;
+        if (!request.done || KEY !in request.headers) return;
+        this.path = request.path;
         string accept = Base64.encode(sha1Of(request.headers[KEY] ~ MAGIC)).to!string;
         assert(socket.isAlive);
         socket.send(
@@ -49,7 +51,7 @@ abstract class WebSocketServer {
     private WebSocketState[PeerID] sockets;
     private Socket listener;
 
-    abstract void onOpen(PeerID s);
+    abstract void onOpen(PeerID s, string path);
     abstract void onTextMessage(PeerID s, string s);
     abstract void onBinaryMessage(PeerID s, ubyte[] o);
     abstract void onClose(PeerID s);
@@ -72,7 +74,6 @@ abstract class WebSocketServer {
         auto s = new WebSocketState(counter++, socket);
         writefln("[DEBUG] Accepting from %s (id=%s)", socket.remoteAddress, s.id);
         sockets[s.id] = s;
-        onOpen(s.id);
     }
 
     private void remove(WebSocketState socket) {
@@ -85,8 +86,13 @@ abstract class WebSocketServer {
     private void handle(WebSocketState socket, ubyte[] message) {
         import std.conv : to;
         string processId = typeof(this).stringof ~ socket.id.to!string;
-        if (socket.handshaken) handleFrame(socket, processId.parse(message));
-        else socket.performHandshake(message);
+        if (socket.handshaken) {
+            handleFrame(socket, processId.parse(message));
+        } else {
+            socket.performHandshake(message);
+            if (socket.handshaken) writefln("[DEBUG] handshake done on path %s", path);
+            onOpen(socket.id, socket.path);
+        }
     }
 
     private void handleFrame(WebSocketState socket, Frame frame) {

@@ -4,7 +4,10 @@ import server;
 
 class EchoSocketServer : WebSocketServer {
 
-    override void onOpen(PeerID s) {}
+    override void onOpen(PeerID s, string path) {
+        writefln("[DEBUG] peer %s connect to '%s'", s, path);
+    }
+
     override void onClose(PeerID s) {}
     override void onBinaryMessage(PeerID s, ubyte[] msg) {}
 
@@ -19,12 +22,12 @@ class EchoSocketServer : WebSocketServer {
 
 class BroadcastServer : WebSocketServer {
 
-    byte[PeerID] peers;
+    string[PeerID] peers;
 
     override void onBinaryMessage(PeerID s, ubyte[] msg) {}
 
-    override void onOpen(PeerID s) {
-        peers[s] = 0;
+    override void onOpen(PeerID s, string path) {
+        peers[s] = path;
     }
 
     override void onClose(PeerID s) {
@@ -32,7 +35,10 @@ class BroadcastServer : WebSocketServer {
     }
 
     override void onTextMessage(PeerID src, string msg) {
-        foreach (uuid,_; peers) if (uuid != src) sendText(uuid, msg);
+        string srcPath = peers[src];
+        foreach (uuid, path; peers)
+            if (uuid != src && path == srcPath)
+                sendText(uuid, msg);
     }
 }
 

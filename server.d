@@ -1,21 +1,25 @@
 import std.stdio;
 import std.socket;
+import std.uuid;
 
+import config;
 import request;
 import frame;
-
-enum size_t MAX_CONNECTIONS = 2;
-enum size_t BUFFER_SIZE = 1024;
-enum ushort PORT = 6969;
 
 class WebSocketState {
     Socket socket;
     bool handshaken;
     Frame[] frames = [];
+    public immutable UUID id;
+    public immutable Address address;
+
+    @disable this();
 
     this(Socket socket) {
         this.socket = socket;
         this.handshaken = false;
+        this.id = randomUUID();
+        this.address = cast(immutable Address) (socket.remoteAddress);
     }
 
     public void performHandshake(ubyte[] message) {
@@ -36,10 +40,6 @@ class WebSocketState {
            ~ "Sec-WebSocket-Accept: " ~ accept ~ "\r\n\r\n");
         handshaken = true;
     }
-
-    public string id() @property {
-        return socket.remoteAddress.toString();
-    }
 }
 
 
@@ -48,8 +48,10 @@ abstract class SocketManager {
     private WebSocketState[] sockets;
     private Socket listener;
 
-    abstract void onTextMessage(Socket s, string s);
-    abstract void onBinaryMessage(Socket s, ubyte[] o);
+    abstract void onOpen(UUID s);
+    abstract void onTextMessage(UUID s, string s);
+    abstract void onBinaryMessage(UUID s, ubyte[] o);
+    abstract void onClose(UUID s);
 
     this() {
         listener = new TcpSocket();
@@ -65,26 +67,28 @@ abstract class SocketManager {
             return;
         }
         writefln("[DEBUG] Accepting from %s", socket.remoteAddress);
-        sockets ~= new WebSocketState(socket);
+        auto s = new WebSocketState(socket);
+        sockets ~= s;
+        onOpen(s.id);
     }
 
     private void remove(WebSocketState socket) {
-        for (size_t i=0; i<sockets.length; i++)
-            if (sockets[i] == socket) {
-                sockets = sockets[0..i] ~ sockets[i+1..$];
-                break;
-            }
+        for (size_t i=0; i<sockets.length; i++) if (sockets[i] == socket) {
+            sockets = sockets[0..i] ~ sockets[i+1..$];
+            break;
+        }
         writefln("[DEBUG] closing %s", socket.id);
-        socket.socket.close();
+        if (socket.socket.isAlive) socket.socket.close();
+        onClose(socket.id);
     }
 
     private void handle(WebSocketState socket, ubyte[] message) {
-        if (socket.handshaken) handleFrame(socket, parse(socket.id, message));
+        if (socket.handshaken) handleFrame(socket, parse(socket.id.toString, message));
         else socket.performHandshake(message);
     }
 
     private void handleFrame(WebSocketState socket, Frame frame) {
-        writefln("[DEBUG] received frame:\n\tdone=%s\n\tfin=%s\n\top=%s\n\tlength=%d",
+        writefln("[DEBUG] received frame: done=%s; fin=%s; op=%s; length=%d",
                 frame.done, frame.fin, frame.op, frame.length);
         if (!frame.done) return;
         final switch (frame.op) {
@@ -106,20 +110,20 @@ abstract class SocketManager {
                 data ~= socket.frames[i].data;
             data ~= frame.data;
             socket.frames = [];
-            if (originalOp == Op.TEXT) onTextMessage(socket.socket, cast(string) data);
-            else if (originalOp == Op.BINARY) onBinaryMessage(socket.socket, data);
+            if (originalOp == Op.TEXT) onTextMessage(socket.id, cast(string) data);
+            else if (originalOp == Op.BINARY) onBinaryMessage(socket.id, data);
         } else socket.frames ~= frame;
     }
 
     private void handleText(WebSocketState socket, Frame frame) {
         assert (socket.frames.length == 0);
-        if (frame.fin) onTextMessage(socket.socket, cast(string) frame.data);
+        if (frame.fin) onTextMessage(socket.id, cast(string) frame.data);
         else socket.frames ~= frame;
     }
 
     private void handleBinary(WebSocketState socket, Frame frame) {
         assert (socket.frames.length == 0);
-        if (frame.fin) onBinaryMessage(socket.socket, frame.data);
+        if (frame.fin) onBinaryMessage(socket.id, frame.data);
         else socket.frames ~= frame;
     }
 
@@ -163,25 +167,4 @@ abstract class SocketManager {
             set.reset();
         }
     }
-}
-
-class MySocketManager : SocketManager {
-
-    override void onTextMessage(Socket s, string msg) {
-        writefln("[DEBUG] received message from %s", s.remoteAddress);
-        writefln("[DEBUG]         message: %s", msg);
-        writefln("[DEBUG]         message length: %d", msg.length);
-    }
-
-    override void onBinaryMessage(Socket s, ubyte[] msg) {
-    }
-
-}
-
-void main() {
-
-    SocketManager manager = new MySocketManager();
-
-    manager.run();
-
 }

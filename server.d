@@ -15,10 +15,10 @@ class WebSocketState {
 
     @disable this();
 
-    this(Socket socket) {
+    this(UUID id, Socket socket) {
         this.socket = socket;
         this.handshaken = false;
-        this.id = randomUUID();
+        this.id = id;
         this.address = cast(immutable Address) (socket.remoteAddress);
     }
 
@@ -43,9 +43,9 @@ class WebSocketState {
 }
 
 
-abstract class SocketManager {
+abstract class WebSocketServer {
 
-    private WebSocketState[] sockets;
+    private WebSocketState[UUID] sockets;
     private Socket listener;
 
     abstract void onOpen(UUID s);
@@ -66,17 +66,16 @@ abstract class SocketManager {
             socket.close();
             return;
         }
-        writefln("[DEBUG] Accepting from %s", socket.remoteAddress);
-        auto s = new WebSocketState(socket);
-        sockets ~= s;
-        onOpen(s.id);
+        UUID id;
+        do { id = randomUUID(); } while (id in sockets);
+        auto s = new WebSocketState(id, socket);
+        sockets[id] = s;
+        onOpen(id);
+        writefln("[DEBUG] Accepting from %s (id=%s)", socket.remoteAddress, id);
     }
 
     private void remove(WebSocketState socket) {
-        for (size_t i=0; i<sockets.length; i++) if (sockets[i] == socket) {
-            sockets = sockets[0..i] ~ sockets[i+1..$];
-            break;
-        }
+        sockets.remove(socket.id);
         writefln("[DEBUG] closing %s", socket.id);
         if (socket.socket.isAlive) socket.socket.close();
         onClose(socket.id);
@@ -139,15 +138,38 @@ abstract class SocketManager {
         writefln("[DEBUG] Received pong from %s", socket.id);
     }
 
+    public void sendText(UUID dest, string message) {
+        if (dest !in sockets) {
+            writefln("[WARN] Trying to send a message to %s which is not connected");
+            return;
+        }
+        import std.string : representation;
+        auto bytes = message.representation.dup;
+        auto frame = Frame(true, Op.TEXT, false, message.length, [0,0,0,0], true, bytes);
+        auto serial = frame.serialize;
+        writefln("[DEBUG] Sending %d bytes to %s in one frame of %d bytes long", bytes.length, dest, serial.length);
+        sockets[dest].socket.send(serial);
+    }
+
+    public void sendBinary(UUID dest, ubyte[] message) {
+        if (dest !in sockets) {
+            writefln("[WARN] Trying to send a message to %s which is not connected");
+            return;
+        }
+        auto frame = Frame(true, Op.BINARY, false, message.length, [0,0,0,0], true, message);
+        auto serial = frame.serialize;
+        writefln("[DEBUG] Sending %d bytes to %s in one frame of %d bytes long", message.length, dest, serial.length);
+        sockets[dest].socket.send(serial);
+    }
+
     public void run() {
         auto set = new SocketSet(MAX_CONNECTIONS+1);
         while (true) {
             set.add(listener);
-            foreach (s; sockets) set.add(s.socket);
+            foreach (id,s; sockets) set.add(s.socket);
             Socket.select(set, null, null);
 
-            for (size_t i=0; i<sockets.length; i++) {
-                auto socket = sockets[i];
+            foreach (id, socket; sockets) {
                 if (!set.isSet(socket.socket)) continue;
                 ubyte[BUFFER_SIZE] buffer;
                 long receivedLength = socket.socket.receive(buffer[]);
@@ -157,7 +179,6 @@ abstract class SocketManager {
                     continue;
                 }
                 remove(socket);
-                i--;
             }
 
             if (set.isSet(listener)) {

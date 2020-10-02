@@ -1,5 +1,5 @@
-import std.stdio;
 import std.socket;
+import std.experimental.logger;
 
 import request;
 import frame;
@@ -65,18 +65,19 @@ abstract class WebSocketServer {
 
     private void add(Socket socket) {
         if (sockets.length >= maxConnections) {
-            writefln("[DEBUG] Too many connections");
+            infof("Maximum number of connections reached (%d)", maxConnections);
             socket.close();
             return;
         }
         auto s = new WebSocketState(counter++, socket);
-        writefln("[DEBUG] Accepting from %s (id=%s)", socket.remoteAddress, s.id);
+        infof("Acception connection from %s (id=%s)", socket.remoteAddress, s.id);
         sockets[s.id] = s;
     }
 
     private void remove(WebSocketState socket) {
         sockets.remove(socket.id);
-        writefln("[DEBUG] closing %s", socket.id);
+        infof("Closing connection with %s (id=%s)", socket.socket.isAlive ?
+                socket.socket.remoteAddress : null, socket.id);
         if (socket.socket.isAlive) socket.socket.close();
         onClose(socket.id);
     }
@@ -88,14 +89,15 @@ abstract class WebSocketServer {
             handleFrame(socket, processId.parse(message));
         } else {
             socket.performHandshake(message);
-            if (socket.handshaken) writefln("[DEBUG] handshake done on path %s", socket.path);
+            if (socket.handshaken)
+                infof("Handshake with %s done (path=%s)", socket.id, socket.path);
             onOpen(socket.id, socket.path);
         }
     }
 
     private void handleFrame(WebSocketState socket, Frame frame) {
-        writefln("[DEBUG] received frame: done=%s; fin=%s; op=%s; length=%d",
-                frame.done, frame.fin, frame.op, frame.length);
+        tracef("From client %s received frame: done=%s; fin=%s; op=%s; length=%d",
+               socket.id, frame.done, frame.fin, frame.op, frame.length);
         if (!frame.done) return;
         final switch (frame.op) {
             case Op.CONT: return handleCont(socket, frame);
@@ -142,30 +144,30 @@ abstract class WebSocketServer {
     }
 
     private void handlePong(WebSocketState socket, Frame frame) {
-        writefln("[DEBUG] Received pong from %s", socket.id);
+        tracef("Received pong from %s", socket.id);
     }
 
     public void sendText(PeerID dest, string message) {
         if (dest !in sockets) {
-            writefln("[WARN] Trying to send a message to %s which is not connected");
+            warningf("Tried to send a message to %s which is not connected", dest);
             return;
         }
         import std.string : representation;
         auto bytes = message.representation.dup;
         auto frame = Frame(true, Op.TEXT, false, message.length, [0,0,0,0], true, bytes);
         auto serial = frame.serialize;
-        writefln("[DEBUG] Sending %d bytes to %s in one frame of %d bytes long", bytes.length, dest, serial.length);
+        tracef("Sending %d bytes to %s in one frame of %d bytes long", bytes.length, dest, serial.length);
         sockets[dest].socket.send(serial);
     }
 
     public void sendBinary(PeerID dest, ubyte[] message) {
         if (dest !in sockets) {
-            writefln("[WARN] Trying to send a message to %s which is not connected");
+            warningf("Tried to send a message to %s which is not connected", dest);
             return;
         }
         auto frame = Frame(true, Op.BINARY, false, message.length, [0,0,0,0], true, message);
         auto serial = frame.serialize;
-        writefln("[DEBUG] Sending %d bytes to %s in one frame of %d bytes long", message.length, dest, serial.length);
+        tracef("Sending %d bytes to %s in one frame of %d bytes long", message.length, dest, serial.length);
         sockets[dest].socket.send(serial);
     }
 
@@ -175,6 +177,9 @@ abstract class WebSocketServer {
         listener.blocking = false;
         listener.bind(new InternetAddress(port));
         listener.listen(10);
+
+        infof("Listening on port: %d", port);
+        infof("Maximum allowed connections: %d", maxConnections);
 
         auto set = new SocketSet(maxConnections+1);
         while (true) {
@@ -186,7 +191,7 @@ abstract class WebSocketServer {
                 if (!set.isSet(socket.socket)) continue;
                 ubyte[bufferSize] buffer;
                 long receivedLength = socket.socket.receive(buffer[]);
-                writefln("[DEBUG] Received %d bytes from %s", receivedLength, socket.id);
+                tracef("Received %d bytes from %s", receivedLength, socket.id);
                 if (receivedLength > 0) {
                     handle(socket, buffer[0 .. receivedLength]);
                     continue;

@@ -1,20 +1,20 @@
-import std.stdio;
+import std.experimental.logger;
 
 import server;
 
 class EchoSocketServer : WebSocketServer {
 
     override void onOpen(PeerID s, string path) {
-        writefln("[DEBUG] peer %s connect to '%s'", s, path);
+        tracef("Peer %s connect to '%s'", s, path);
     }
 
     override void onClose(PeerID s) {}
     override void onBinaryMessage(PeerID s, ubyte[] msg) {}
 
     override void onTextMessage(PeerID s, string msg) {
-        writefln("[DEBUG] received message from %s", s);
-        writefln("[DEBUG]         message: %s", msg);
-        writefln("[DEBUG]         message length: %d", msg.length);
+        tracef("Received message from %s", s);
+        tracef("         message: %s", msg);
+        tracef("         message length: %d", msg.length);
         sendText(s, msg);
     }
 
@@ -43,7 +43,7 @@ class BroadcastServer : WebSocketServer {
 }
 
 void main() {
-    WebSocketServer manager = new BroadcastServer();
-    manager.run!(6969, 10);
+    WebSocketServer server = new BroadcastServer();
+    server.run!(6969, 10);
 }
 

@@ -22,9 +22,7 @@ class EchoSocketServer : WebSocketServer {
 
 class BroadcastServer : WebSocketServer {
 
-    string[PeerID] peers;
-
-    override void onBinaryMessage(PeerID s, ubyte[] msg) {}
+    private string[PeerID] peers;
 
     override void onOpen(PeerID s, string path) {
         peers[s] = path;
@@ -35,15 +33,23 @@ class BroadcastServer : WebSocketServer {
     }
 
     override void onTextMessage(PeerID src, string msg) {
-        string srcPath = peers[src];
-        foreach (uuid, path; peers)
-            if (uuid != src && path == srcPath)
-                sendText(uuid, msg);
+        send!(sendText, typeof(msg))(src, msg);
     }
+
+    override void onBinaryMessage(PeerID src, ubyte[] msg) {
+        send!(sendBinary, typeof(msg))(src, msg);
+    }
+
+    private void send(alias sender, T)(PeerID src, T msg) {
+        string srcPath = peers[src];
+        foreach (id, path; peers)
+            if (id != src && path == srcPath)
+                sender(id, msg);
+    }
+
 }
 
 void main() {
     WebSocketServer server = new BroadcastServer();
-    server.run!(6969, 10);
+    server.run!(10301, 10);
 }
-

@@ -1,7 +1,6 @@
 import std.stdio;
 import std.socket;
 
-import config;
 import request;
 import frame;
 
@@ -24,7 +23,7 @@ class WebSocketState {
         this.address = cast(immutable Address) (socket.remoteAddress);
     }
 
-    public bool performHandshake(ubyte[] message) {
+    public void performHandshake(ubyte[] message) {
         import std.base64 : Base64;
         import std.digest.sha : sha1Of;
         import std.conv : to;
@@ -50,6 +49,7 @@ abstract class WebSocketServer {
 
     private WebSocketState[PeerID] sockets;
     private Socket listener;
+    private size_t maxConnections;
 
     abstract void onOpen(PeerID s, string path);
     abstract void onTextMessage(PeerID s, string s);
@@ -60,13 +60,11 @@ abstract class WebSocketServer {
 
     this() {
         listener = new TcpSocket();
-        listener.blocking = false;
-        listener.bind(new InternetAddress(PORT));
-        listener.listen(10);
+
     }
 
     private void add(Socket socket) {
-        if (sockets.length >= MAX_CONNECTIONS) {
+        if (sockets.length >= maxConnections) {
             writefln("[DEBUG] Too many connections");
             socket.close();
             return;
@@ -90,7 +88,7 @@ abstract class WebSocketServer {
             handleFrame(socket, processId.parse(message));
         } else {
             socket.performHandshake(message);
-            if (socket.handshaken) writefln("[DEBUG] handshake done on path %s", path);
+            if (socket.handshaken) writefln("[DEBUG] handshake done on path %s", socket.path);
             onOpen(socket.id, socket.path);
         }
     }
@@ -171,8 +169,14 @@ abstract class WebSocketServer {
         sockets[dest].socket.send(serial);
     }
 
-    public void run() {
-        auto set = new SocketSet(MAX_CONNECTIONS+1);
+    public void run(ushort port, size_t maxConnections, size_t bufferSize = 1024)() {
+        this.maxConnections = maxConnections;
+
+        listener.blocking = false;
+        listener.bind(new InternetAddress(port));
+        listener.listen(10);
+
+        auto set = new SocketSet(maxConnections+1);
         while (true) {
             set.add(listener);
             foreach (id,s; sockets) set.add(s.socket);
@@ -180,7 +184,7 @@ abstract class WebSocketServer {
 
             foreach (id, socket; sockets) {
                 if (!set.isSet(socket.socket)) continue;
-                ubyte[BUFFER_SIZE] buffer;
+                ubyte[bufferSize] buffer;
                 long receivedLength = socket.socket.receive(buffer[]);
                 writefln("[DEBUG] Received %d bytes from %s", receivedLength, socket.id);
                 if (receivedLength > 0) {

@@ -44,6 +44,6 @@ class BroadcastServer : WebSocketServer {
 
 void main() {
     WebSocketServer manager = new BroadcastServer();
-    manager.run();
+    manager.run!(6969, 10);
 }
 

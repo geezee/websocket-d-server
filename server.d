@@ -60,7 +60,6 @@ abstract class WebSocketServer {
 
     this() {
         listener = new TcpSocket();
-
     }
 
     private void add(Socket socket) {
@@ -76,17 +75,23 @@ abstract class WebSocketServer {
 
     private void remove(WebSocketState socket) {
         sockets.remove(socket.id);
-        infof("Closing connection with %s (id=%s)", socket.socket.isAlive ?
-                socket.socket.remoteAddress : null, socket.id);
+        infof("Closing connection with client id %s", socket.id);
         if (socket.socket.isAlive) socket.socket.close();
         onClose(socket.id);
     }
 
     private void handle(WebSocketState socket, ubyte[] message) {
         import std.conv : to;
+        import std.algorithm : swap;
         string processId = typeof(this).stringof ~ socket.id.to!string;
         if (socket.handshaken) {
-            handleFrame(socket, processId.parse(message));
+            Frame prevFrame = processId.parse(message);
+            Frame newFrame, temp;
+            do {
+                handleFrame(socket, prevFrame);
+                newFrame = processId.parse([]);
+                swap(newFrame, prevFrame);
+            } while (newFrame != prevFrame);
         } else {
             socket.performHandshake(message);
             if (socket.handshaken)
